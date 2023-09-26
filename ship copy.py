@@ -1,5 +1,6 @@
 import pygame
-from math import sqrt
+import math
+import random
 from queue import PriorityQueue
 
 WIDTH = 800
@@ -25,13 +26,13 @@ class Spot:
         self.x = row * width
         self.y = col * width
         self.color = WHITE
-        self.cardinal_neighbors = set()
-        self.diagonal = set()
+        self.neighbors = []
+        self.unres_neighbors = []
         self.width = width
         self.total_rows = total_rows
 
     def get_pos(self):
-        return self.x, self.y
+        return self.row, self.col
 
     def is_closed(self):
         return self.color == RED
@@ -50,6 +51,12 @@ class Spot:
 
     def reset(self):
         self.color = WHITE
+
+    def make_color(self, color) -> None:
+        self.color = color
+
+    def get_color(self):
+        return self.color
 
     def make_start(self):
         self.color = ORANGE
@@ -73,35 +80,35 @@ class Spot:
         pygame.draw.rect(
             win, self.color, (self.x, self.y, self.width, self.width))
 
-    def update_cardinal_neighbors(self, grid):
-        self.cardinal_neighbors = set()
+    def update_neighbors(self, grid):
+        self.neighbors = []
         # DOWN
-        if self.row + 1 < self.total_rows and not grid[self.row + 1][self.col].is_barrier():
-            self.cardinal_neighbors.add(grid[self.row + 1][self.col])
+        if self.row < self.total_rows - 1 and not grid[self.row + 1][self.col].is_barrier():
+            self.neighbors.append(grid[self.row + 1][self.col])
         # UP
         if self.row > 0 and not grid[self.row - 1][self.col].is_barrier():
-            self.cardinal_neighbors.add(grid[self.row - 1][self.col])
+            self.neighbors.append(grid[self.row - 1][self.col])
         # RIGHT
         if self.col < self.total_rows - 1 and not grid[self.row][self.col + 1].is_barrier():
-            self.cardinal_neighbors.add(grid[self.row][self.col + 1])
+            self.neighbors.append(grid[self.row][self.col + 1])
         # LEFT
         if self.col > 0 and not grid[self.row][self.col - 1].is_barrier():
-            self.cardinal_neighbors.add(grid[self.row][self.col - 1])
+            self.neighbors.append(grid[self.row][self.col - 1])
 
-    def update_diagonal_neighbors(self, grid):
-        self.diagonal = set()
-        # UP RIGHT
-        if self.row > 0 and self.col < self.total_rows - 1 and not grid[self.row - 1][self.col + 1].is_barrier():
-            self.diagonal.add(grid[self.row - 1][self.col + 1])
-        # UP LEFT
-        if self.row > 0 and self.col > 0 and not grid[self.row - 1][self.col - 1].is_barrier():
-            self.diagonal.add(grid[self.row - 1][self.col - 1])
-        # DOWN RIGHT
-        if self.row + 1 < self.total_rows and self.col < self.total_rows - 1 and not grid[self.row + 1][self.col + 1].is_barrier():
-            self.diagonal.add(grid[self.row + 1][self.col + 1])
-        # DOWN LEFT
-        if self.row + 1 < self.total_rows and self.col > 0 and not grid[self.row + 1][self.col - 1].is_barrier():
-            self.diagonal.add(grid[self.row + 1][self.col - 1])
+    def update_unres_neighbors(self, grid):
+        self.unres_neighbors = []
+        # DOWN
+        if self.row < self.total_rows - 1:
+            self.unres_neighbors.append(grid[self.row + 1][self.col])
+        # UP
+        if self.row > 0:
+            self.unres_neighbors.append(grid[self.row - 1][self.col])
+        # RIGHT
+        if self.col < self.total_rows - 1:
+            self.unres_neighbors.append(grid[self.row][self.col + 1])
+        # LEFT
+        if self.col > 0:
+            self.unres_neighbors.append(grid[self.row][self.col - 1])
 
     def __lt__(self, other):
         return False
@@ -111,12 +118,6 @@ def h(p1, p2):
     x1, y1 = p1
     x2, y2 = p2
     return abs(x1 - x2) + abs(y1 - y2)
-
-
-def h_euc(p1, p2):
-    x1, y1 = p1
-    x2, y2 = p2
-    return sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
 
 
 def reconstruct_path(came_from, current, draw):
@@ -129,29 +130,26 @@ def reconstruct_path(came_from, current, draw):
 def algorithm(draw, grid, start, end):
     count = 0
 
+    # frontier
+    open_set = PriorityQueue()
+    open_set.put((0, count, start))
+    came_from = {}
+
     # heuristic
     g_score = {spot: float('inf') for row in grid for spot in row}
     g_score[start] = 0
     f_score = {spot: float('inf') for row in grid for spot in row}
-    f_score[start] = g_score[start] + h_euc(start.get_pos(), end.get_pos())
-
-    # frontier
-    open_set = PriorityQueue()
-    open_set.put((f_score[start], count, start))
-
-    came_from = {}
+    f_score[start] = g_score[start] + h(start.get_pos(), end.get_pos())
 
     # reached
     open_set_hash = {start}
-    hi = 0
+
     while not open_set.empty():
-        hi += 1
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
 
-        f, _, current = open_set.get()
-        print(f, hi)
+        current = open_set.get()[2]
         open_set_hash.remove(current)
 
         if current == end:
@@ -159,19 +157,15 @@ def algorithm(draw, grid, start, end):
             start.make_start()
             end.make_end()
             return True
-        neighbors = current.cardinal_neighbors | current.diagonal
 
-        for neighbor in neighbors:
-            if neighbor in current.cardinal_neighbors:
-                temp_g_score = g_score[current] + 10
-            elif neighbor in current.diagonal:
-                temp_g_score = g_score[current] + 14
+        for neighbor in current.neighbors:
+            temp_g_score = g_score[current] + 1
 
             if temp_g_score < g_score[neighbor]:
                 came_from[neighbor] = current
                 g_score[neighbor] = temp_g_score
                 f_score[neighbor] = temp_g_score + \
-                    h_euc(neighbor.get_pos(), end.get_pos())
+                    h(neighbor.get_pos(), end.get_pos())
                 if neighbor not in open_set_hash:
                     count += 1
                     open_set.put((f_score[neighbor], count, neighbor))
@@ -193,10 +187,39 @@ def make_grid(rows, width):
         grid.append([])
         for j in range(rows):
             spot = Spot(i, j, gap, rows)
+            spot.make_barrier()
             grid[i].append(spot)
     return grid
 
 # ???
+
+
+def make_ship(draw, grid, rows):
+    # Find a random spot on the grid
+    random_row = random.randint(0, rows-1)
+    random_col = random.randint(0, rows-1)
+
+    start = grid[random_row][random_col]
+
+    start.make_open()
+
+    # Set of neighbors
+    green = {start}
+
+    while green:
+        # Pop the current one
+        curr_cell = green.pop()
+
+        # Turn it white
+        curr_cell.reset()
+
+        # Look at neighbors
+        curr_cell.update_unres_neighbors(grid)
+
+        for cell in curr_cell.unres_neighbors:
+
+            cell.make_color(GREEN)
+            # green.add(cell)
 
 
 def draw_grid_lines(win, rows, width):
@@ -231,6 +254,7 @@ def get_clicked_pos(pos, rows, width):
 def main(win, width):
     ROWS = 10
     grid = make_grid(ROWS, width)
+    make_ship(draw, grid, ROWS)
 
     start = None
     end = None
@@ -264,13 +288,31 @@ def main(win, width):
                     start = None
                 elif spot == end:
                     end = None
+            elif pygame.mouse.get_pressed()[1]:  # Middle Mouse Button
+                pos = pygame.mouse.get_pos()
+                row, col = get_clicked_pos(pos, ROWS, width)
+                spot = grid[row][col]
+                spot.make_color(GREEN)
+                if spot == start:
+                    start = None
+                elif spot == end:
+                    end = None
+            elif event.type == pygame.KEYDOWN:  # Middle Mouse Button
+                if event.key == pygame.K_d:
+                    pos = pygame.mouse.get_pos()
+                    row, col = get_clicked_pos(pos, ROWS, width)
+                    spot = grid[row][col]
+                    spot.make_color(RED)
+                    if spot == start:
+                        start = None
+                    elif spot == end:
+                        end = None
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE and start and end:
                     for row in grid:
                         for spot in row:
-                            spot.update_cardinal_neighbors(grid)
-                            spot.update_diagonal_neighbors(grid)
+                            spot.update_neighbors(grid)
                     algorithm(lambda: draw(win, grid, ROWS, width),
                               grid, start, end)
 
